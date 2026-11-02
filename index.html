@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulasi Monte Carlo — Estimasi π</title>
+  <style>
+    :root {
+      --bg: #0b1220; --panel: #121d30; --panel2: #17243a;
+      --text: #edf3ff; --muted: #9aabc4; --accent: #65d6ad;
+      --blue: #7ab7ff; --line: #263751; --danger: #ff8585;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; padding: 32px 18px;
+      color: var(--text); background: radial-gradient(circle at top, #1a2b45, var(--bg) 55%);
+      font: 15px/1.6 system-ui, -apple-system, Segoe UI, sans-serif;
+    }
+    .container { width: min(1050px, 100%); margin: auto; }
+    header { margin-bottom: 24px; }
+    .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .14em; font-size: 12px; font-weight: 800; }
+    h1 { margin: 6px 0; font-size: clamp(27px, 5vw, 42px); line-height: 1.15; }
+    .subtitle { color: var(--muted); max-width: 720px; margin: 8px 0 0; }
+    .layout { display: grid; grid-template-columns: 340px 1fr; gap: 18px; }
+    .panel {
+      background: color-mix(in srgb, var(--panel) 94%, transparent);
+      border: 1px solid var(--line); border-radius: 18px; padding: 21px;
+      box-shadow: 0 18px 50px #0003;
+    }
+    h2 { margin: 0 0 15px; font-size: 17px; }
+    label { display: block; color: var(--muted); font-size: 13px; margin: 14px 0 6px; }
+    input, select {
+      width: 100%; padding: 11px 12px; border: 1px solid var(--line);
+      border-radius: 10px; color: var(--text); background: var(--panel2); font: inherit;
+    }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 5px; }
+    .buttons { display: flex; gap: 9px; margin-top: 20px; }
+    button {
+      border: 0; border-radius: 10px; padding: 11px 16px; font-weight: 750;
+      cursor: pointer; font: inherit;
+    }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .primary { color: #082219; background: var(--accent); flex: 1; }
+    .secondary { color: var(--text); background: #263751; }
+    .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .stat { background: var(--panel2); border: 1px solid var(--line); border-radius: 13px; padding: 13px; min-width: 0; }
+    .stat span { color: var(--muted); display: block; font-size: 12px; }
+    .stat strong { display: block; font-size: clamp(18px, 3vw, 25px); margin-top: 4px; overflow-wrap: anywhere; }
+    .pi { color: var(--accent); }
+    .progress-wrap { margin: 18px 0 8px; height: 9px; background: #263751; border-radius: 20px; overflow: hidden; }
+    .progress { height: 100%; width: 0%; background: linear-gradient(90deg, var(--blue), var(--accent)); transition: width .15s; }
+    .status { color: var(--muted); font-size: 13px; min-height: 22px; }
+    canvas { display: block; width: 100%; max-width: 440px; aspect-ratio: 1; margin: 8px auto 0; }
+    .formula { background: #0b1525; border: 1px solid var(--line); padding: 12px; border-radius: 10px; text-align: center; margin-top: 15px; }
+    .note { color: var(--muted); font-size: 13px; margin: 16px 0 0; }
+    .full { grid-column: 1 / -1; }
+    @media (max-width: 780px) { .layout { grid-template-columns: 1fr; } .full { grid-column: auto; } }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <header>
+      <div class="eyebrow">Parallel Computing · Monte Carlo</div>
+      <h1>Estimasi Nilai π</h1>
+      <p class="subtitle">Simulasi Monte Carlo menggunakan titik acak pada persegi satuan. Pekerjaan dibagi ke beberapa Web Worker, masing-masing memiliki generator angka acak sendiri.</p>
+    </header>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>Pengaturan simulasi</h2>
+        <label for="samples">Jumlah titik (sample)</label>
+        <input id="samples" type="number" min="1000" max="1000000000" step="1000" value="10000000">
+        <div class="hint">Maksimum sesuai tugas: 1.000.000.000 titik. Mulai dari 1–10 juta untuk menguji perangkat.</div>
+
+        <label for="threads">Jumlah thread / worker</label>
+        <select id="threads">
+          <option value="1">1 worker</option><option value="2">2 workers</option>
+          <option value="4" selected>4 workers</option><option value="6">6 workers</option>
+          <option value="8">8 workers</option><option value="12">12 workers</option>
+          <option value="16">16 workers</option>
+        </select>
+        <div class="hint">Worker berjalan paralel di browser. Pilih sesuai jumlah core CPU yang tersedia.</div>
+
+        <div class="buttons">
+          <button class="primary" id="start">Mulai simulasi</button>
+          <button class="secondary" id="stop" disabled>Stop</button>
+        </div>
+        <div class="progress-wrap"><div class="progress" id="progress"></div></div>
+        <div class="status" id="status">Siap. Atur sample dan jumlah worker, lalu mulai.</div>
+      </div>
+
+      <div class="panel">
+        <h2>Hasil perhitungan</h2>
+        <div class="stats">
+          <div class="stat"><span>Estimasi π</span><strong class="pi" id="estimate">—</strong></div>
+          <div class="stat"><span>Nilai π (referensi)</span><strong>3.14159265</strong></div>
+          <div class="stat"><span>Titik di dalam lingkaran</span><strong id="inside">0</strong></div>
+          <div class="stat"><span>Total titik diproses</span><strong id="processed">0</strong></div>
+          <div class="stat"><span>Error absolut</span><strong id="error">—</strong></div>
+          <div class="stat"><span>Waktu berjalan</span><strong id="elapsed">0.00 s</strong></div>
+        </div>
+        <div class="formula">π ≈ 4 × (jumlah titik di dalam lingkaran / total titik)</div>
+        <p class="note">Semakin banyak sample, estimasi umumnya semakin stabil. Hasil setiap eksekusi dapat sedikit berbeda karena titik dibuat secara acak.</p>
+      </div>
+
+      <div class="panel full">
+        <h2>Visualisasi kuadran satuan</h2>
+        <canvas id="plot" width="600" height="600" aria-label="Visualisasi kuadran dan lingkaran satuan"></canvas>
+        <p class="note">Grafik menampilkan bentuk kuadran dan lingkaran satuan sebagai ilustrasi. Simulasi menghitung seluruh titik secara numerik, bukan menggambar satu miliar titik ke layar.</p>
+      </div>
+    </section>
+  </main>
+
+<script>
+"use strict";
+
+// Menggambar seperempat lingkaran pada kuadran [0,1] x [0,1].
+const canvas = document.getElementById("plot");
+const ctx = canvas.getContext("2d");
+function drawPlot() {
+  const w = canvas.width, h = canvas.height, pad = 42;
+  const size = w - pad * 2, left = pad, top = pad;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#101d30"; ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "#7ab7ff"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(left, top + size); ctx.lineTo(left + size, top + size);
+  ctx.lineTo(left + size, top); ctx.stroke();
+  ctx.strokeStyle = "#65d6ad"; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.arc(left + size, top + size, size, Math.PI, Math.PI * 1.5); ctx.stroke();
+  ctx.fillStyle = "#9aabc4"; ctx.font = "18px system-ui";
+  ctx.fillText("0", left - 20, top + size + 23);
+  ctx.fillText("1", left + size - 5, top + size + 23);
+  ctx.fillText("1", left - 23, top + 7);
+  ctx.fillText("x", left + size / 2, top + size + 30);
+  ctx.fillText("y", left - 28, top + size / 2);
+}
+drawPlot();
+
+// Kode worker dibuat sebagai Blob agar seluruh program tetap berada dalam satu file HTML.
+const workerSource = `
+"use strict";
+function makeSfc32(seed) {
+  // Empat state 32-bit unik untuk setiap worker.
+  let a = seed ^ 0x9E3779B9, b = (seed + 0x243F6A88) >>> 0;
+  let c = (seed ^ 0xB7E15162) >>> 0, d = (seed + 0xDEADBEEF) >>> 0;
+  return function() {
+    a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0;
+    let t = (a + b | 0) + d | 0;
+    d = d + 1 | 0;
+    a = b ^ b >>> 9;
+    b = c + (c << 3) | 0;
+    c = (c << 21 | c >>> 11);
+    c = c + t | 0;
+    return (t >>> 0) / 4294967296;
+  };
+}
+let running = false;
+self.onmessage = function(event) {
+  const { count, seed, batchSize } = event.data;
+  if (running) return;
+  running = true;
+  const random = makeSfc32(seed >>> 0);
+  let inside = 0, done = 0;
+  function runBatch() {
+    if (!running) return;
+    const amount = Math.min(batchSize, count - done);
+    for (let i = 0; i < amount; i++) {
+      const x = random(), y = random();
+      if (x * x + y * y <= 1) inside++;
+    }
+    done += amount;
+    self.postMessage({ type: "progress", done, inside });
+    if (done < count) setTimeout(runBatch, 0);
+    else {
+      running = false;
+      self.postMessage({ type: "done", done, inside });
+    }
+  }
+  runBatch();
+};
+`;
+
+// Pengendali utama: membagi sample, menerima hasil worker, lalu melakukan reduction.
+const $ = id => document.getElementById(id);
+let workers = [], completed = 0, totalInside = 0, totalDone = 0;
+let targetSamples = 0, startTime = 0, timer = null, stopped = false;
+
+function formatNumber(value) { return Number(value).toLocaleString("id-ID"); }
+function updateStats() {
+  $("inside").textContent = formatNumber(totalInside);
+  $("processed").textContent = formatNumber(totalDone);
+  $("progress").style.width = targetSamples ? (100 * totalDone / targetSamples) + "%" : "0%";
+  if (totalDone > 0) {
+    const estimate = 4 * totalInside / totalDone;
+    $("estimate").textContent = estimate.toFixed(10);
+    $("error").textContent = Math.abs(Math.PI - estimate).toFixed(10);
+  }
+  $("elapsed").textContent = ((performance.now() - startTime) / 1000).toFixed(2) + " s";
+}
+
+function finish(message) {
+  clearInterval(timer);
+  workers.forEach(worker => worker.terminate());
+  workers = [];
+  $("start").disabled = false;
+  $("stop").disabled = true;
+  $("status").textContent = message;
+}
+
+$("start").addEventListener("click", () => {
+  const samples = Number($("samples").value);
+  const workerCount = Number($("threads").value);
+  if (!Number.isSafeInteger(samples) || samples < 1000 || samples > 1000000000) {
+    $("status").textContent = "Masukkan sample bilangan bulat antara 1.000 dan 1.000.000.000.";
+    return;
+  }
+
+  targetSamples = samples;
+  completed = 0; totalInside = 0; totalDone = 0; stopped = false;
+  startTime = performance.now();
+  $("estimate").textContent = "Menghitung…";
+  $("error").textContent = "—";
+  $("inside").textContent = "0";
+  $("processed").textContent = "0";
+  $("progress").style.width = "0%";
+  $("start").disabled = true;
+  $("stop").disabled = false;
+  $("status").textContent = "Menjalankan " + workerCount + " worker…";
+
+  const blob = new Blob([workerSource], { type: "text/javascript" });
+  const workerUrl = URL.createObjectURL(blob);
+  const baseCount = Math.floor(samples / workerCount);
+  const remainder = samples % workerCount;
+
+  for (let i = 0; i < workerCount; i++) {
+    const worker = new Worker(workerUrl);
+    workers.push(worker);
+    const assigned = baseCount + (i < remainder ? 1 : 0);
+    // Seed berbeda untuk tiap worker; RNG tidak pernah dibagi antar-worker.
+    const seed = (Date.now() + Math.imul(i + 1, 0x6D2B79F5)) >>> 0;
+    worker.onmessage = event => {
+      const data = event.data;
+      if (data.type === "progress") {
+        // Reduction: akumulasikan hasil parsial dari worker pada thread utama.
+        // Tidak ada shared accumulator, sehingga tidak terjadi race condition.
+        // Hitung delta agar progress berulang tidak dihitung dua kali.
+        const previous = worker.lastDone || 0;
+        totalDone += data.done - previous;
+        totalInside += data.inside - (worker.lastInside || 0);
+        worker.lastDone = data.done;
+        worker.lastInside = data.inside;
+        updateStats();
+      } else if (data.type === "done") {
+        completed++;
+        if (completed === workerCount) {
+          totalDone = targetSamples;
+          updateStats();
+          finish("Selesai. Semua " + formatNumber(targetSamples) + " titik berhasil diproses.");
+        }
+      }
+    };
+    worker.onerror = () => finish("Terjadi kesalahan pada worker. Coba kurangi jumlah worker atau sample.");
+    worker.postMessage({ count: assigned, seed, batchSize: 250000 });
+  }
+  URL.revokeObjectURL(workerUrl);
+  timer = setInterval(updateStats, 250);
+});
+
+$("stop").addEventListener("click", () => {
+  stopped = true;
+  finish("Simulasi dihentikan. Hasil yang tampil hanya berdasarkan titik yang sudah diproses.");
+});
+</script>
+</body>
+</html>
